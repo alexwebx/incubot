@@ -286,7 +286,7 @@ coverage/
   },
   "dependencies": {
     "@supabase/supabase-js": "2.49.4",
-    "next": "15.5.9",
+    "next": "16.2.1",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },
@@ -294,8 +294,8 @@ coverage/
     "@types/node": "22.13.10",
     "@types/react": "19.0.10",
     "@types/react-dom": "19.0.4",
-    "eslint": "8.57.1",
-    "eslint-config-next": "15.5.9",
+    "eslint": "9.21.0",
+    "eslint-config-next": "16.2.1",
     "typescript": "5.8.2"
   }
 }
@@ -339,8 +339,8 @@ coverage/
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  eslint: {
-    ignoreDuringBuilds: true,
+  turbopack: {
+    root: process.cwd(),
   },
 };
 
