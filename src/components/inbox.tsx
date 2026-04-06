@@ -1,11 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { PublicUser } from "@/lib/auth";
 import { groupMessages, getDisplayName, getMessagePreview, type Message } from "@/lib/messages";
-import { supabase } from "@/lib/supabase";
+import { ManagersModal } from "@/components/managers-modal";
 
 type InboxProps = {
+  currentUser: PublicUser;
   initialMessages: Message[];
+};
+
+type MessagesResponse = {
+  messages?: Message[];
+  error?: string;
 };
 
 type SendMessageResponse = {
@@ -23,19 +30,19 @@ function formatMessageTime(value: string) {
 }
 
 async function loadMessages() {
-  const { data, error } = await supabase
-    .from("messages")
-    .select("id, telegram_chat_id, username, first_name, last_name, text, created_at, direction")
-    .order("created_at", { ascending: false });
+  const response = await fetch("/api/messages", {
+    cache: "no-store",
+  });
+  const payload = (await response.json()) as MessagesResponse;
 
-  if (error) {
-    throw new Error(error.message);
+  if (!response.ok || !payload.messages) {
+    throw new Error(payload.error ?? "Failed to refresh messages");
   }
 
-  return (data ?? []) as Message[];
+  return payload.messages;
 }
 
-export function Inbox({ initialMessages }: InboxProps) {
+export function Inbox({ currentUser, initialMessages }: InboxProps) {
   const [messages, setMessages] = useState(initialMessages);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(
     initialMessages[0]?.telegram_chat_id ?? null,
@@ -43,10 +50,13 @@ export function Inbox({ initialMessages }: InboxProps) {
   const [draft, setDraft] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isManagersOpen, setIsManagersOpen] = useState(false);
 
   const groups = useMemo(() => groupMessages(messages), [messages]);
-  const selectedGroup = groups.find((group) => group.telegram_chat_id === selectedChatId) ?? groups[0] ?? null;
+  const selectedGroup =
+    groups.find((group) => group.telegram_chat_id === selectedChatId) ?? groups[0] ?? null;
 
   useEffect(() => {
     if (!groups.length) {
@@ -66,10 +76,14 @@ export function Inbox({ initialMessages }: InboxProps) {
     setErrorMessage(null);
 
     try {
-      const nextMessages = await loadMessages();
-      setMessages(nextMessages);
+      setMessages(await loadMessages());
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to refresh messages");
+      const message = error instanceof Error ? error.message : "Failed to refresh messages";
+      setErrorMessage(message);
+
+      if (message === "Unauthorized") {
+        window.location.reload();
+      }
     } finally {
       setIsRefreshing(false);
     }
@@ -104,7 +118,9 @@ export function Inbox({ initialMessages }: InboxProps) {
         throw new Error(payload.error ?? "Failed to send message");
       }
 
-      setMessages((currentMessages) => [payload.message as Message, ...currentMessages]);
+      const createdMessage = payload.message;
+
+      setMessages((currentMessages) => [createdMessage, ...currentMessages]);
       setDraft("");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to send message");
@@ -113,140 +129,198 @@ export function Inbox({ initialMessages }: InboxProps) {
     }
   }
 
+  async function handleLogout() {
+    setIsLoggingOut(true);
+
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+      });
+    } finally {
+      window.location.reload();
+    }
+  }
+
   return (
-    <main className="page">
-      <section className="shell">
-        <aside className="sidebar">
-          <div className="sidebarTop">
-            <div>
-              <p className="eyebrow">Incubot Admin</p>
-              <h1>Telegram Inbox</h1>
-              <p className="subtitle">Список пользователей слева, переписка справа.</p>
+    <>
+      <main className="page">
+        <section className="shell">
+          <aside className="sidebar">
+            <div className="sidebarTop">
+              <div>
+                <p className="eyebrow">Incubot Admin</p>
+                <h1>Telegram Inbox</h1>
+                <p className="subtitle">
+                  {currentUser.full_name || currentUser.email} ·{" "}
+                  {currentUser.role === "admin" ? "Главный админ" : "Менеджер"}
+                </p>
+              </div>
+
+              <div className="sidebarButtons">
+                <button
+                  type="button"
+                  className="refreshButton"
+                  onClick={handleRefresh}
+                  disabled={isRefreshing}
+                >
+                  {isRefreshing ? "Обновляем..." : "Обновить"}
+                </button>
+
+                <button
+                  type="button"
+                  className="ghostButton"
+                  onClick={() => setIsManagersOpen(true)}
+                >
+                  {currentUser.role === "admin" ? "Менеджеры" : "Профиль"}
+                </button>
+
+                <button
+                  type="button"
+                  className="ghostButton"
+                  onClick={handleLogout}
+                  disabled={isLoggingOut}
+                >
+                  {isLoggingOut ? "Выходим..." : "Выйти"}
+                </button>
+              </div>
             </div>
 
-            <button
-              type="button"
-              className="refreshButton"
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-            >
-              {isRefreshing ? "Обновляем..." : "Обновить"}
-            </button>
-          </div>
+            <div className="sidebarStats">
+              <article className="statCard">
+                <span className="statLabel">Users</span>
+                <strong className="statValue">{groups.length}</strong>
+              </article>
+              <article className="statCard">
+                <span className="statLabel">Messages</span>
+                <strong className="statValue">{messages.length}</strong>
+              </article>
+            </div>
 
-          <div className="sidebarStats">
-            <article className="statCard">
-              <span className="statLabel">Users</span>
-              <strong className="statValue">{groups.length}</strong>
-            </article>
-            <article className="statCard">
-              <span className="statLabel">Messages</span>
-              <strong className="statValue">{messages.length}</strong>
-            </article>
-          </div>
+            <div className="chatList">
+              {groups.length === 0 ? (
+                <section className="emptySidebar">
+                  <p className="emptyTitle">Пока пусто</p>
+                  <p className="emptyText">
+                    Сообщения появятся здесь после первого диалога в Telegram.
+                  </p>
+                </section>
+              ) : (
+                groups.map((group) => {
+                  const lastMessage = group.messages[group.messages.length - 1];
+                  const isActive = group.telegram_chat_id === selectedGroup?.telegram_chat_id;
 
-          <div className="chatList">
-            {groups.length === 0 ? (
-              <section className="emptySidebar">
-                <p className="emptyTitle">Пока пусто</p>
-                <p className="emptyText">Сообщения появятся здесь после первого диалога в Telegram.</p>
-              </section>
-            ) : (
-              groups.map((group) => {
-                const lastMessage = group.messages[group.messages.length - 1];
-                const isActive = group.telegram_chat_id === selectedGroup?.telegram_chat_id;
-
-                return (
-                  <button
-                    key={group.telegram_chat_id}
-                    type="button"
-                    className={`chatListItem${isActive ? " active" : ""}`}
-                    onClick={() => setSelectedChatId(group.telegram_chat_id)}
-                  >
-                    <div className="chatAvatar" aria-hidden="true">
-                      {getDisplayName(group).slice(0, 1).toUpperCase()}
-                    </div>
-
-                    <div className="chatMeta">
-                      <div className="chatMetaTop">
-                        <strong>{getDisplayName(group)}</strong>
-                        <time>{formatMessageTime(group.latest_message_at)}</time>
+                  return (
+                    <button
+                      key={group.telegram_chat_id}
+                      type="button"
+                      className={`chatListItem${isActive ? " active" : ""}`}
+                      onClick={() => setSelectedChatId(group.telegram_chat_id)}
+                    >
+                      <div className="chatAvatar" aria-hidden="true">
+                        {getDisplayName(group).slice(0, 1).toUpperCase()}
                       </div>
 
-                      <p className="chatPreview">{getMessagePreview(lastMessage)}</p>
+                      <div className="chatMeta">
+                        <div className="chatMetaTop">
+                          <strong>{getDisplayName(group)}</strong>
+                          <time>{formatMessageTime(group.latest_message_at)}</time>
+                        </div>
 
-                      <p className="chatSecondary">
-                        <span>{group.username ? `@${group.username}` : "без username"}</span>
-                        <span>{group.messages.length} сообщений</span>
-                      </p>
-                    </div>
-                  </button>
-                );
-              })
+                        <p className="chatPreview">{getMessagePreview(lastMessage)}</p>
+
+                        <p className="chatSecondary">
+                          <span>{group.username ? `@${group.username}` : "без username"}</span>
+                          <span>{group.messages.length} сообщений</span>
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </aside>
+
+          <section className="conversationPanel">
+            {selectedGroup ? (
+              <>
+                <header className="conversationHeader">
+                  <div>
+                    <p className="conversationEyebrow">Диалог</p>
+                    <h2>{getDisplayName(selectedGroup)}</h2>
+                    <p className="conversationMeta">
+                      <span>chat_id: {selectedGroup.telegram_chat_id}</span>
+                      <span>
+                        {selectedGroup.username ? `@${selectedGroup.username}` : "без username"}
+                      </span>
+                    </p>
+                  </div>
+                </header>
+
+                <div className="messagesPane">
+                  {selectedGroup.messages.map((message) => (
+                    <article
+                      key={message.id}
+                      className={`bubble ${
+                        message.direction === "outgoing" ? "bubbleOutgoing" : "bubbleIncoming"
+                      }`}
+                    >
+                      <p className="messageText">{message.text || "-"}</p>
+                      <time className="messageTime">
+                        {new Date(message.created_at).toLocaleString("ru-RU")}
+                      </time>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="composer">
+                  <label className="composerLabel" htmlFor="reply">
+                    Ответ пользователю
+                  </label>
+                  <textarea
+                    id="reply"
+                    className="composerInput"
+                    placeholder="Введите ответ, который уйдёт в Telegram..."
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    rows={4}
+                  />
+
+                  <div className="composerActions">
+                    {errorMessage ? (
+                      <p className="errorText">{errorMessage}</p>
+                    ) : (
+                      <span className="hintText">
+                        Ответ появится в боте сразу после отправки.
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="sendButton"
+                      onClick={handleSendMessage}
+                      disabled={isSending || !draft.trim()}
+                    >
+                      {isSending ? "Отправляем..." : "Отправить"}
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <section className="emptyConversation">
+                <p className="emptyTitle">Нет выбранного диалога</p>
+                <p className="emptyText">
+                  Когда появятся пользователи, можно будет открыть переписку справа.
+                </p>
+              </section>
             )}
-          </div>
-        </aside>
-
-        <section className="conversationPanel">
-          {selectedGroup ? (
-            <>
-              <header className="conversationHeader">
-                <div>
-                  <p className="conversationEyebrow">Диалог</p>
-                  <h2>{getDisplayName(selectedGroup)}</h2>
-                  <p className="conversationMeta">
-                    <span>chat_id: {selectedGroup.telegram_chat_id}</span>
-                    <span>{selectedGroup.username ? `@${selectedGroup.username}` : "без username"}</span>
-                  </p>
-                </div>
-              </header>
-
-              <div className="messagesPane">
-                {selectedGroup.messages.map((message) => (
-                  <article
-                    key={message.id}
-                    className={`bubble ${message.direction === "outgoing" ? "bubbleOutgoing" : "bubbleIncoming"}`}
-                  >
-                    <p className="messageText">{message.text || "-"}</p>
-                    <time className="messageTime">{new Date(message.created_at).toLocaleString("ru-RU")}</time>
-                  </article>
-                ))}
-              </div>
-
-              <div className="composer">
-                <label className="composerLabel" htmlFor="reply">
-                  Ответ пользователю
-                </label>
-                <textarea
-                  id="reply"
-                  className="composerInput"
-                  placeholder="Введите ответ, который уйдёт в Telegram..."
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  rows={4}
-                />
-
-                <div className="composerActions">
-                  {errorMessage ? <p className="errorText">{errorMessage}</p> : <span className="hintText">Ответ появится в боте сразу после отправки.</span>}
-                  <button
-                    type="button"
-                    className="sendButton"
-                    onClick={handleSendMessage}
-                    disabled={isSending || !draft.trim()}
-                  >
-                    {isSending ? "Отправляем..." : "Отправить"}
-                  </button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <section className="emptyConversation">
-              <p className="emptyTitle">Нет выбранного диалога</p>
-              <p className="emptyText">Когда появятся пользователи, можно будет открыть переписку справа.</p>
-            </section>
-          )}
+          </section>
         </section>
-      </section>
-    </main>
+      </main>
+
+      <ManagersModal
+        currentUser={currentUser}
+        isOpen={isManagersOpen}
+        onClose={() => setIsManagersOpen(false)}
+      />
+    </>
   );
 }

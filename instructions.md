@@ -258,11 +258,29 @@ alter table public.messages
 
 - `src/app/page.tsx`
 - `src/components/inbox.tsx`
+- `src/components/auth-shell.tsx`
+- `src/components/managers-modal.tsx`
 - `src/lib/messages.ts`
+- `src/lib/auth.ts`
+- `src/lib/server/auth.ts`
+- `src/lib/server/password.ts`
+- `src/lib/server/session.ts`
+- `src/lib/server/supabase-admin.ts`
+- `src/lib/server/email.ts`
 - `src/app/globals.css`
+- `src/app/api/auth/login/route.ts`
+- `src/app/api/auth/register/route.ts`
+- `src/app/api/auth/recover/route.ts`
+- `src/app/api/auth/logout/route.ts`
+- `src/app/api/auth/change-password/route.ts`
+- `src/app/api/managers/route.ts`
+- `src/app/api/managers/[managerId]/approve/route.ts`
+- `src/app/api/managers/[managerId]/password/route.ts`
+- `src/app/api/messages/route.ts`
 - `src/app/api/messages/send/route.ts`
 - `supabase/functions/telegram-webhook/index.ts`
 - `supabase/migrations/20260406110000_add_message_direction.sql`
+- `supabase/migrations/20260406170000_create_admin_users.sql`
 
 Что важно после pull / восстановления:
 
@@ -276,6 +294,14 @@ supabase db push
 
 ```env
 TELEGRAM_BOT_TOKEN=replace_with_telegram_bot_token
+SUPABASE_SERVICE_ROLE_KEY=replace_with_supabase_service_role_key
+AUTH_SESSION_SECRET=replace_with_random_long_secret
+SMTP_HOST=replace_with_smtp_host
+SMTP_PORT=465
+SMTP_USER=replace_with_smtp_user
+SMTP_PASS=replace_with_smtp_password
+SMTP_FROM=Incubot <noreply@example.com>
+APP_URL=https://incubot.vercel.app/
 ```
 
 3. После деплоя или локального запуска админки:
@@ -287,9 +313,89 @@ TELEGRAM_BOT_TOKEN=replace_with_telegram_bot_token
 
 Что отложено отдельно:
 
-- Авторизация админки
-- Защита route `src/app/api/messages/send/route.ts`
-- Ограничение чтения `messages` только для авторизованных пользователей
+- Ничего из auth-флоу не отложено: реализованы логин, регистрация, восстановление пароля и кабинет менеджеров
+
+## 6. Текущий прогресс по авторизации от 2026-04-06
+
+Сделано на этом шаге:
+
+- Добавлена новая таблица `public.admin_users` для кастомной авторизации
+- Добавлены стартовые пользователи:
+  - `admin@webx.com / 12345678` с ролью `admin`
+  - `kuzyuberdin@gmail.com / 12345678` с ролью `manager`
+- Для менеджера включено согласование:
+  - новые менеджеры создаются с `is_approved = false`
+  - пока админ не согласует менеджера, вход в кабинет запрещён
+- Главная страница теперь работает в двух режимах:
+  - если сессии нет, показывается auth-экран
+  - если сессия есть, показывается inbox
+- Сделаны 3 модальных окна / режима:
+  - авторизация
+  - регистрация
+  - восстановление пароля
+- Добавлена cookie-session авторизация на стороне Next.js
+- Все server routes для сообщений и менеджеров теперь защищены сессией
+- Публичный select policy для `messages` удалён, чтение теперь идёт через server-side `SUPABASE_SERVICE_ROLE_KEY`
+
+Функционал для админа:
+
+- Кнопка `Менеджеры` в интерфейсе доступна только админу
+- В модальном окне админ видит всех менеджеров
+- Админ может:
+  - согласовать менеджера
+  - сменить менеджеру пароль
+- При согласовании менеджеру отправляется письмо, что он может зайти на `https://incubot.vercel.app/`
+
+Функционал для менеджера:
+
+- После входа менеджер видит кнопку `Профиль`
+- В этом окне менеджер может поменять только свой пароль
+- Менеджер не видит список других менеджеров и не может никого согласовывать
+
+Восстановление пароля:
+
+- По email генерируется новый пароль
+- Новый пароль сохраняется в `public.admin_users.password_hash`
+- Пользователю отправляется email с новым паролем
+
+Новая миграция:
+
+### 6.1. `supabase/migrations/20260406170000_create_admin_users.sql`
+
+Создаёт:
+
+- таблицу `public.admin_users`
+- RLS с полным запретом прямого доступа через `anon/authenticated`
+- начальные записи admin и manager
+- удаляет policy `Allow select for all` с `public.messages`
+
+Обязательные env для Vercel / локального Next.js после этого шага:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://mxobymjsqoprdudiiayk.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=replace_with_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=replace_with_supabase_service_role_key
+TELEGRAM_BOT_TOKEN=replace_with_telegram_bot_token
+AUTH_SESSION_SECRET=replace_with_random_long_secret
+SMTP_HOST=replace_with_smtp_host
+SMTP_PORT=465
+SMTP_USER=replace_with_smtp_user
+SMTP_PASS=replace_with_smtp_password
+SMTP_FROM=Incubot <noreply@example.com>
+APP_URL=https://incubot.vercel.app/
+```
+
+Проверка после деплоя:
+
+1. Открыть главную страницу и убедиться, что показывается auth-экран
+2. Войти под `admin@webx.com / 12345678`
+3. Открыть модалку `Менеджеры`
+4. Согласовать `kuzyuberdin@gmail.com`
+5. Проверить, что на почту менеджера ушло письмо
+6. Выйти
+7. Войти под менеджером
+8. Проверить смену своего пароля
+9. Проверить восстановление пароля через форму `Восстановление`
 
 ### 4.2. `supabase/migrations/20260323234100_enable_rls_and_policies.sql`
 

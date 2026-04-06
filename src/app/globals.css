@@ -10,6 +10,8 @@
   --accent: #53bdeb;
   --accent-2: #005c4b;
   --accent-3: #103529;
+  --danger: #ff8f8f;
+  --success: #91f5be;
   --shadow: 0 32px 90px rgba(0, 0, 0, 0.38);
 }
 
@@ -30,6 +32,12 @@ body {
 
 body {
   min-height: 100vh;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
 }
 
 .page {
@@ -65,6 +73,12 @@ body {
   padding: 24px 22px 18px;
 }
 
+.sidebarButtons {
+  display: grid;
+  gap: 10px;
+  align-self: flex-start;
+}
+
 .eyebrow {
   margin: 0 0 6px;
   color: var(--accent);
@@ -89,7 +103,10 @@ h1 {
 }
 
 .refreshButton,
-.sendButton {
+.sendButton,
+.ghostButton,
+.primaryWideButton,
+.authTab {
   border: 0;
   border-radius: 14px;
   padding: 12px 16px;
@@ -99,22 +116,44 @@ h1 {
   transition:
     transform 160ms ease,
     opacity 160ms ease,
-    background 160ms ease;
+    background 160ms ease,
+    color 160ms ease;
 }
 
-.refreshButton {
-  align-self: flex-start;
+.refreshButton,
+.ghostButton {
   background: rgba(83, 189, 235, 0.12);
   color: var(--accent);
 }
 
+.sendButton,
+.primaryWideButton {
+  background: var(--accent);
+  color: #06212d;
+}
+
+.authTab {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+}
+
+.authTab.active {
+  background: rgba(83, 189, 235, 0.18);
+  color: var(--text);
+}
+
 .refreshButton:hover,
-.sendButton:hover {
+.sendButton:hover,
+.ghostButton:hover,
+.primaryWideButton:hover,
+.authTab:hover {
   transform: translateY(-1px);
 }
 
 .refreshButton:disabled,
-.sendButton:disabled {
+.sendButton:disabled,
+.ghostButton:disabled,
+.primaryWideButton:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
@@ -199,7 +238,9 @@ h1 {
 .chatMetaTop,
 .chatSecondary,
 .conversationMeta,
-.composerActions {
+.composerActions,
+.modalHeader,
+.managerCardTop {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -224,7 +265,8 @@ h1 {
 .conversationMeta,
 .messageTime,
 .hintText,
-.errorText {
+.errorText,
+.managerMeta {
   color: var(--muted);
   font-size: 12px;
 }
@@ -270,7 +312,9 @@ h1 {
   font-weight: 800;
 }
 
-.conversationHeader h2 {
+.conversationHeader h2,
+.modalCard h2,
+.authModal h2 {
   margin: 0;
   font-size: 1.8rem;
   letter-spacing: -0.04em;
@@ -306,6 +350,15 @@ h1 {
   border-top-right-radius: 8px;
 }
 
+.messageText {
+  margin: 0 0 12px;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .composer {
   padding: 20px 28px 24px;
   border-top: 1px solid var(--border);
@@ -319,11 +372,9 @@ h1 {
   font-weight: 700;
 }
 
-.composerInput {
+.composerInput,
+.authInput {
   width: 100%;
-  resize: vertical;
-  min-height: 110px;
-  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 18px;
   background: rgba(32, 44, 51, 0.82);
@@ -331,7 +382,22 @@ h1 {
   font: inherit;
 }
 
-.composerInput:focus {
+.composerInput {
+  resize: vertical;
+  min-height: 110px;
+  padding: 14px 16px;
+}
+
+.authInput {
+  padding: 14px 16px;
+}
+
+.authInput.compact {
+  padding: 12px 14px;
+}
+
+.composerInput:focus,
+.authInput:focus {
   outline: 2px solid rgba(83, 189, 235, 0.28);
   border-color: rgba(83, 189, 235, 0.36);
 }
@@ -340,13 +406,21 @@ h1 {
   margin-top: 14px;
 }
 
-.sendButton {
-  background: var(--accent);
-  color: #06212d;
+.errorText,
+.errorBanner {
+  color: var(--danger);
 }
 
-.errorText {
-  color: #ff8f8f;
+.successBanner {
+  color: var(--success);
+}
+
+.errorBanner,
+.successBanner {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .emptySidebar,
@@ -367,6 +441,167 @@ h1 {
   color: var(--muted);
 }
 
+.authPage {
+  min-height: 100vh;
+  padding: 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 480px);
+  gap: 24px;
+  align-items: stretch;
+}
+
+.authHero,
+.authCard {
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  box-shadow: var(--shadow);
+}
+
+.authHero {
+  display: flex;
+  align-items: flex-end;
+  padding: 40px;
+  min-height: 560px;
+  background:
+    radial-gradient(circle at top left, rgba(83, 189, 235, 0.18), transparent 30%),
+    linear-gradient(135deg, rgba(16, 53, 41, 0.95), rgba(17, 27, 33, 0.98));
+}
+
+.authHeroInner {
+  max-width: 540px;
+}
+
+.authTitle {
+  margin: 0;
+  font-size: clamp(2.4rem, 6vw, 4.8rem);
+  line-height: 0.95;
+}
+
+.authSubtitle {
+  margin: 18px 0 0;
+  color: rgba(233, 237, 239, 0.82);
+  font-size: 18px;
+  line-height: 1.55;
+}
+
+.authCard {
+  padding: 26px;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  background: linear-gradient(180deg, rgba(24, 34, 41, 0.96), rgba(11, 20, 26, 0.98));
+}
+
+.authTabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.authModal {
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.primaryWideButton {
+  width: 100%;
+}
+
+.authLinks {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.authLinks button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 9, 12, 0.76);
+  backdrop-filter: blur(8px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.modalCard {
+  width: min(920px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 24px;
+  border-radius: 28px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(24, 34, 41, 0.98), rgba(11, 20, 26, 0.98));
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 18px;
+}
+
+.managerList {
+  display: grid;
+  gap: 14px;
+}
+
+.managerCard {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.managerCard.self {
+  max-width: 560px;
+}
+
+.managerMeta {
+  margin: 6px 0 0;
+}
+
+.managerActions,
+.selfPasswordBlock {
+  display: grid;
+  gap: 10px;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 143, 143, 0.12);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.statusBadge.approved {
+  background: rgba(145, 245, 190, 0.12);
+  color: var(--success);
+}
+
+@media (max-width: 980px) {
+  .authPage {
+    grid-template-columns: 1fr;
+  }
+
+  .authHero {
+    min-height: 320px;
+  }
+}
+
 @media (max-width: 768px) {
   .page {
     padding: 0;
@@ -384,8 +619,12 @@ h1 {
     border-bottom: 1px solid var(--border);
   }
 
-  .sidebarTop {
+  .sidebarTop,
+  .authLinks,
+  .managerCardTop,
+  .modalHeader {
     flex-direction: column;
+    align-items: flex-start;
   }
 
   .sidebarStats {
@@ -394,14 +633,27 @@ h1 {
 
   .conversationHeader,
   .messagesPane,
-  .composer {
+  .composer,
+  .authHero,
+  .authCard,
+  .modalCard {
     padding-left: 16px;
     padding-right: 16px;
   }
 
   .composerActions,
-  .conversationMeta {
+  .conversationMeta,
+  .authTabs {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .authTabs {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .authPage {
+    padding: 16px;
   }
 }

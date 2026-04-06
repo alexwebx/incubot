@@ -1,29 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import type { Message } from "@/lib/messages";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
-
-if (!supabaseUrl) {
-  throw new Error("NEXT_PUBLIC_SUPABASE_URL is required");
-}
-
-if (!supabaseAnonKey) {
-  throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY is required");
-}
-
-if (!telegramBotToken) {
-  throw new Error("TELEGRAM_BOT_TOKEN is required");
-}
-
-const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+import { requireUser, unauthorizedResponse } from "@/lib/server/auth";
+import { getSupabaseAdmin } from "@/lib/server/supabase-admin";
 
 type SendMessagePayload = {
   telegram_chat_id?: string;
@@ -34,6 +12,14 @@ type SendMessagePayload = {
 };
 
 export async function POST(request: Request) {
+  try {
+    await requireUser();
+  } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") {
+      return unauthorizedResponse();
+    }
+  }
+
   let payload: SendMessagePayload;
 
   try {
@@ -44,6 +30,11 @@ export async function POST(request: Request) {
 
   const telegramChatId = payload.telegram_chat_id?.trim();
   const text = payload.text?.trim();
+  const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+
+  if (!telegramBotToken) {
+    return NextResponse.json({ error: "TELEGRAM_BOT_TOKEN is required" }, { status: 500 });
+  }
 
   if (!telegramChatId || !text) {
     return NextResponse.json(
@@ -75,7 +66,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseAdmin()
     .from("messages")
     .insert({
       telegram_chat_id: telegramChatId,
