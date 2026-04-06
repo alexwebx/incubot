@@ -141,6 +141,7 @@ Deno.serve(async (req) => {
     first_name: firstName,
     last_name: lastName,
     text,
+    direction: "incoming",
   });
 
   if (error) {

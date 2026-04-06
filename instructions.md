@@ -221,6 +221,76 @@ alter table public.messages
   add column if not exists last_name varchar(255);
 ```
 
+### 4.4. `supabase/migrations/20260406110000_add_message_direction.sql`
+
+```sql
+alter table public.messages
+  add column if not exists direction text not null default 'incoming';
+
+update public.messages
+set direction = 'incoming'
+where direction is null;
+
+alter table public.messages
+  drop constraint if exists messages_direction_check;
+
+alter table public.messages
+  add constraint messages_direction_check
+  check (direction in ('incoming', 'outgoing'));
+```
+
+## 5. Текущий прогресс по UI от 2026-04-06
+
+Сделано на этом шаге:
+
+- Переделана админка в двухпанельный интерфейс:
+  - слева список пользователей
+  - справа активный диалог
+- Сортировка пользователей слева теперь идёт по времени последнего сообщения:
+  - если пользователь написал новым сообщением, он поднимается вверх
+  - если админ отправил ответ пользователю, этот диалог тоже поднимается вверх
+- Добавлена кнопка `Обновить`, которая заново запрашивает сообщения из Supabase
+- Добавлена возможность отправлять сообщение пользователю прямо из правой панели
+- Исходящие сообщения теперь сохраняются в таблицу `messages` с `direction = 'outgoing'`
+- Входящие сообщения из Telegram webhook теперь сохраняются с `direction = 'incoming'`
+
+Изменённые файлы:
+
+- `src/app/page.tsx`
+- `src/components/inbox.tsx`
+- `src/lib/messages.ts`
+- `src/app/globals.css`
+- `src/app/api/messages/send/route.ts`
+- `supabase/functions/telegram-webhook/index.ts`
+- `supabase/migrations/20260406110000_add_message_direction.sql`
+
+Что важно после pull / восстановления:
+
+1. Применить новую миграцию:
+
+```bash
+supabase db push
+```
+
+2. Для отправки ответов из админки в Next.js должен быть задан:
+
+```env
+TELEGRAM_BOT_TOKEN=replace_with_telegram_bot_token
+```
+
+3. После деплоя или локального запуска админки:
+
+- открыть интерфейс
+- выбрать пользователя слева
+- написать ответ справа
+- убедиться, что сообщение пришло пользователю в Telegram
+
+Что отложено отдельно:
+
+- Авторизация админки
+- Защита route `src/app/api/messages/send/route.ts`
+- Ограничение чтения `messages` только для авторизованных пользователей
+
 ### 4.2. `supabase/migrations/20260323234100_enable_rls_and_policies.sql`
 
 ```sql
