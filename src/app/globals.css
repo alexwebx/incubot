@@ -135,6 +135,11 @@ h1 {
 .authTab {
   background: rgba(255, 255, 255, 0.04);
   color: var(--muted);
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.2;
+  text-align: center;
 }
 
 .authTab.active {

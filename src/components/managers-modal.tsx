@@ -77,7 +77,7 @@ export function ManagersModal({ currentUser, isOpen, onClose }: ManagersModalPro
           manager.id === payload.manager?.id ? payload.manager : manager,
         ),
       );
-      setSuccessMessage("Менеджер согласован. Письмо отправлено.");
+      setSuccessMessage("Менеджер согласован.");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Approval failed");
     }

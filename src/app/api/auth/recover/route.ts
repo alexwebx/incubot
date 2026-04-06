@@ -9,11 +9,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Email is required" }, { status: 400 });
     }
 
-    await recoverPassword(email);
+    const nextPassword = await recoverPassword(email);
+
+    if (!nextPassword) {
+      return NextResponse.json({
+        success: true,
+        message: "Если аккаунт существует, новый пароль уже сгенерирован.",
+      });
+    }
 
     return NextResponse.json({
       success: true,
-      message: "If the account exists, a new generated password has been sent by email.",
+      message: `Новый пароль: ${nextPassword}`,
     });
   } catch (error) {
     return NextResponse.json(

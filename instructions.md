@@ -266,7 +266,6 @@ alter table public.messages
 - `src/lib/server/password.ts`
 - `src/lib/server/session.ts`
 - `src/lib/server/supabase-admin.ts`
-- `src/lib/server/email.ts`
 - `src/app/globals.css`
 - `src/app/api/auth/login/route.ts`
 - `src/app/api/auth/register/route.ts`
@@ -296,11 +295,6 @@ supabase db push
 TELEGRAM_BOT_TOKEN=replace_with_telegram_bot_token
 SUPABASE_SERVICE_ROLE_KEY=replace_with_supabase_service_role_key
 AUTH_SESSION_SECRET=replace_with_random_long_secret
-SMTP_HOST=replace_with_smtp_host
-SMTP_PORT=465
-SMTP_USER=replace_with_smtp_user
-SMTP_PASS=replace_with_smtp_password
-SMTP_FROM=Incubot <noreply@example.com>
 APP_URL=https://incubot.vercel.app/
 ```
 
@@ -344,7 +338,7 @@ APP_URL=https://incubot.vercel.app/
 - Админ может:
   - согласовать менеджера
   - сменить менеджеру пароль
-- При согласовании менеджеру отправляется письмо, что он может зайти на `https://incubot.vercel.app/`
+- При согласовании менеджер получает доступ к входу без дополнительной отправки письма
 
 Функционал для менеджера:
 
@@ -356,7 +350,7 @@ APP_URL=https://incubot.vercel.app/
 
 - По email генерируется новый пароль
 - Новый пароль сохраняется в `public.admin_users.password_hash`
-- Пользователю отправляется email с новым паролем
+- Новый пароль показывается сразу в интерфейсе после запроса восстановления
 
 Новая миграция:
 
@@ -377,11 +371,6 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=replace_with_supabase_anon_key
 SUPABASE_SERVICE_ROLE_KEY=replace_with_supabase_service_role_key
 TELEGRAM_BOT_TOKEN=replace_with_telegram_bot_token
 AUTH_SESSION_SECRET=replace_with_random_long_secret
-SMTP_HOST=replace_with_smtp_host
-SMTP_PORT=465
-SMTP_USER=replace_with_smtp_user
-SMTP_PASS=replace_with_smtp_password
-SMTP_FROM=Incubot <noreply@example.com>
 APP_URL=https://incubot.vercel.app/
 ```
 
@@ -391,11 +380,11 @@ APP_URL=https://incubot.vercel.app/
 2. Войти под `admin@webx.com / 12345678`
 3. Открыть модалку `Менеджеры`
 4. Согласовать `kuzyuberdin@gmail.com`
-5. Проверить, что на почту менеджера ушло письмо
+5. Выйти
 6. Выйти
 7. Войти под менеджером
 8. Проверить смену своего пароля
-9. Проверить восстановление пароля через форму `Восстановление`
+9. Проверить восстановление пароля через форму `Восстановление` и убедиться, что новый пароль показывается в UI
 
 ### 4.2. `supabase/migrations/20260323234100_enable_rls_and_policies.sql`
 

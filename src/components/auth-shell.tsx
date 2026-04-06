@@ -92,7 +92,7 @@ export function AuthShell() {
         email: recoverEmail,
       });
 
-      setSuccessMessage(payload.message ?? "Письмо отправлено.");
+      setSuccessMessage(payload.message ?? "Новый пароль сгенерирован.");
       setRecoverEmail("");
       setActiveView("login");
     } catch (error) {

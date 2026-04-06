@@ -3,7 +3,6 @@ import type { AppUser, PublicUser, UserRole } from "@/lib/auth";
 import { clearSessionCookie, getSessionPayload, setSessionCookie } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabase-admin";
 import { generateTemporaryPassword, hashPassword, verifyPassword } from "@/lib/server/password";
-import { sendApprovalEmail, sendRecoveredPasswordEmail } from "@/lib/server/email";
 
 type DbUser = AppUser & {
   password_hash: string;
@@ -163,7 +162,7 @@ export async function recoverPassword(email: string) {
   const user = await findUserByEmail(email);
 
   if (!user) {
-    return;
+    return null;
   }
 
   const temporaryPassword = generateTemporaryPassword();
@@ -180,7 +179,7 @@ export async function recoverPassword(email: string) {
     throw new Error(error.message);
   }
 
-  await sendRecoveredPasswordEmail(user.email, temporaryPassword);
+  return temporaryPassword;
 }
 
 export async function changeOwnPassword(userId: string, currentPassword: string, nextPassword: string) {
@@ -247,8 +246,6 @@ export async function approveManager(managerId: string, adminUser: AppUser) {
   if (error) {
     throw new Error(error.message);
   }
-
-  await sendApprovalEmail(manager.email);
 
   return data;
 }
