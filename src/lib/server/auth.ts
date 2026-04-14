@@ -4,12 +4,47 @@ import { clearSessionCookie, getSessionPayload, setSessionCookie } from "@/lib/s
 import { getSupabaseAdmin } from "@/lib/server/supabase-admin";
 import { generateTemporaryPassword, hashPassword, verifyPassword } from "@/lib/server/password";
 
+type AuthUserRow = {
+  id: string;
+  email: string;
+  password_hash: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type ManagerRow = {
+  user_id: string;
+  full_name: string | null;
+  role: UserRole;
+  is_approved: boolean;
+  approved_at: string | null;
+  approved_by: string | null;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type DbUser = AppUser & {
   password_hash: string;
 };
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
+}
+
+function combineUser(authUser: AuthUserRow, manager: ManagerRow): DbUser {
+  return {
+    id: manager.user_id,
+    email: authUser.email,
+    full_name: manager.full_name,
+    role: manager.role,
+    is_approved: manager.is_approved,
+    approved_at: manager.approved_at,
+    approved_by: manager.approved_by,
+    created_at: manager.created_at,
+    updated_at: manager.updated_at,
+    password_hash: authUser.password_hash,
+  };
 }
 
 function toPublicUser(user: AppUser): PublicUser {
@@ -24,12 +59,12 @@ function toPublicUser(user: AppUser): PublicUser {
   };
 }
 
-export async function findUserByEmail(email: string) {
+async function findAuthUserByEmail(email: string) {
   const { data, error } = await getSupabaseAdmin()
-    .from("admin_users")
-    .select("*")
+    .from("auth_users")
+    .select("id, email, password_hash, created_at, updated_at")
     .eq("email", normalizeEmail(email))
-    .maybeSingle<DbUser>();
+    .maybeSingle<AuthUserRow>();
 
   if (error) {
     throw new Error(error.message);
@@ -38,18 +73,87 @@ export async function findUserByEmail(email: string) {
   return data;
 }
 
-export async function findUserById(id: string) {
+async function findAuthUserById(id: string) {
   const { data, error } = await getSupabaseAdmin()
-    .from("admin_users")
-    .select("*")
+    .from("auth_users")
+    .select("id, email, password_hash, created_at, updated_at")
     .eq("id", id)
-    .maybeSingle<DbUser>();
+    .maybeSingle<AuthUserRow>();
 
   if (error) {
     throw new Error(error.message);
   }
 
   return data;
+}
+
+async function findManagerByUserId(userId: string) {
+  const { data, error } = await getSupabaseAdmin()
+    .from("managers")
+    .select(
+      "user_id, full_name, role, is_approved, approved_at, approved_by, last_login_at, created_at, updated_at",
+    )
+    .eq("user_id", userId)
+    .maybeSingle<ManagerRow>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+async function hydrateUsers(managers: ManagerRow[]) {
+  if (managers.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await getSupabaseAdmin()
+    .from("auth_users")
+    .select("id, email, password_hash, created_at, updated_at")
+    .in(
+      "id",
+      managers.map((manager) => manager.user_id),
+    );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const authUsersById = new Map((data ?? []).map((user) => [user.id, user as AuthUserRow]));
+
+  return managers
+    .map((manager) => {
+      const authUser = authUsersById.get(manager.user_id);
+      return authUser ? combineUser(authUser, manager) : null;
+    })
+    .filter((user): user is DbUser => user !== null);
+}
+
+export async function findUserByEmail(email: string) {
+  const authUser = await findAuthUserByEmail(email);
+
+  if (!authUser) {
+    return null;
+  }
+
+  const manager = await findManagerByUserId(authUser.id);
+
+  if (!manager) {
+    return null;
+  }
+
+  return combineUser(authUser, manager);
+}
+
+export async function findUserById(id: string) {
+  const [authUser, manager] = await Promise.all([findAuthUserById(id), findManagerByUserId(id)]);
+
+  if (!authUser || !manager) {
+    return null;
+  }
+
+  return combineUser(authUser, manager);
 }
 
 export async function getCurrentUser() {
@@ -107,9 +211,9 @@ export async function loginUser(email: string, password: string) {
 
   const now = new Date().toISOString();
   const { error } = await getSupabaseAdmin()
-    .from("admin_users")
+    .from("managers")
     .update({ last_login_at: now, updated_at: now })
-    .eq("id", user.id);
+    .eq("user_id", user.id);
 
   if (error) {
     throw new Error(error.message);
@@ -130,50 +234,67 @@ export async function registerManager(input: {
   password: string;
 }) {
   const email = normalizeEmail(input.email);
-  const existingUser = await findUserByEmail(email);
+  const existingUser = await findAuthUserByEmail(email);
 
   if (existingUser) {
     throw new Error("Email already exists");
   }
 
   const now = new Date().toISOString();
-  const { data, error } = await getSupabaseAdmin()
-    .from("admin_users")
+  const { data: createdAuthUser, error: createAuthError } = await getSupabaseAdmin()
+    .from("auth_users")
     .insert({
       email,
-      full_name: input.fullName.trim() || null,
       password_hash: hashPassword(input.password),
-      role: "manager",
-      is_approved: false,
       created_at: now,
       updated_at: now,
     })
-    .select("id, email, full_name, role, is_approved, approved_at, created_at")
-    .single<PublicUser>();
+    .select("id, email, password_hash, created_at, updated_at")
+    .single<AuthUserRow>();
 
-  if (error) {
-    throw new Error(error.message);
+  if (createAuthError) {
+    throw new Error(createAuthError.message);
   }
 
-  return data;
+  const { error: createManagerError } = await getSupabaseAdmin().from("managers").insert({
+    user_id: createdAuthUser.id,
+    full_name: input.fullName.trim() || null,
+    role: "manager",
+    is_approved: false,
+    created_at: now,
+    updated_at: now,
+  });
+
+  if (createManagerError) {
+    await getSupabaseAdmin().from("auth_users").delete().eq("id", createdAuthUser.id);
+    throw new Error(createManagerError.message);
+  }
+
+  const user = await findUserById(createdAuthUser.id);
+
+  if (!user) {
+    throw new Error("Failed to create manager");
+  }
+
+  return toPublicUser(user);
 }
 
 export async function recoverPassword(email: string) {
-  const user = await findUserByEmail(email);
+  const authUser = await findAuthUserByEmail(email);
 
-  if (!user) {
+  if (!authUser) {
     return null;
   }
 
   const temporaryPassword = generateTemporaryPassword();
   const now = new Date().toISOString();
   const { error } = await getSupabaseAdmin()
-    .from("admin_users")
+    .from("auth_users")
     .update({
       password_hash: hashPassword(temporaryPassword),
       updated_at: now,
     })
-    .eq("id", user.id);
+    .eq("id", authUser.id);
 
   if (error) {
     throw new Error(error.message);
@@ -191,7 +312,7 @@ export async function changeOwnPassword(userId: string, currentPassword: string,
 
   const now = new Date().toISOString();
   const { error } = await getSupabaseAdmin()
-    .from("admin_users")
+    .from("auth_users")
     .update({
       password_hash: hashPassword(nextPassword),
       updated_at: now,
@@ -205,13 +326,15 @@ export async function changeOwnPassword(userId: string, currentPassword: string,
 
 export async function listManagers(currentUser: AppUser) {
   let query = getSupabaseAdmin()
-    .from("admin_users")
-    .select("id, email, full_name, role, is_approved, approved_at, created_at")
+    .from("managers")
+    .select(
+      "user_id, full_name, role, is_approved, approved_at, approved_by, last_login_at, created_at, updated_at",
+    )
     .eq("role", "manager")
     .order("created_at", { ascending: false });
 
   if (currentUser.role !== "admin") {
-    query = query.eq("id", currentUser.id);
+    query = query.eq("user_id", currentUser.id);
   }
 
   const { data, error } = await query;
@@ -220,7 +343,31 @@ export async function listManagers(currentUser: AppUser) {
     throw new Error(error.message);
   }
 
-  return (data ?? []) as PublicUser[];
+  const users = await hydrateUsers((data ?? []) as ManagerRow[]);
+
+  return users.map(toPublicUser);
+}
+
+export async function listAssignableUsers(currentUser: AppUser) {
+  if (currentUser.role !== "admin") {
+    return [toPublicUser(currentUser)];
+  }
+
+  const { data, error } = await getSupabaseAdmin()
+    .from("managers")
+    .select(
+      "user_id, full_name, role, is_approved, approved_at, approved_by, last_login_at, created_at, updated_at",
+    )
+    .or(`user_id.eq.${currentUser.id},and(role.eq.manager,is_approved.eq.true)`)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const users = await hydrateUsers((data ?? []) as ManagerRow[]);
+
+  return users.map(toPublicUser);
 }
 
 export async function approveManager(managerId: string, adminUser: AppUser) {
@@ -231,23 +378,27 @@ export async function approveManager(managerId: string, adminUser: AppUser) {
   }
 
   const now = new Date().toISOString();
-  const { data, error } = await getSupabaseAdmin()
-    .from("admin_users")
+  const { error } = await getSupabaseAdmin()
+    .from("managers")
     .update({
       is_approved: true,
       approved_at: now,
       approved_by: adminUser.id,
       updated_at: now,
     })
-    .eq("id", managerId)
-    .select("id, email, full_name, role, is_approved, approved_at, created_at")
-    .single<PublicUser>();
+    .eq("user_id", managerId);
 
   if (error) {
     throw new Error(error.message);
   }
 
-  return data;
+  const updatedUser = await findUserById(managerId);
+
+  if (!updatedUser) {
+    throw new Error("Manager not found");
+  }
+
+  return toPublicUser(updatedUser);
 }
 
 export async function setManagerPassword(managerId: string, nextPassword: string) {
@@ -259,7 +410,7 @@ export async function setManagerPassword(managerId: string, nextPassword: string
 
   const now = new Date().toISOString();
   const { error } = await getSupabaseAdmin()
-    .from("admin_users")
+    .from("auth_users")
     .update({
       password_hash: hashPassword(nextPassword),
       updated_at: now,

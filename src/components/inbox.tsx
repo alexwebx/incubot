@@ -1,22 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import type { PublicUser } from "@/lib/auth";
-import { groupMessages, getDisplayName, getMessagePreview, type Message } from "@/lib/messages";
+import { type DialogMessage, type InboxDialog, getClientDisplayName, getDialogPreview } from "@/lib/dialogs";
+import { supabase } from "@/lib/supabase";
 import { ManagersModal } from "@/components/managers-modal";
 
 type InboxProps = {
   currentUser: PublicUser;
-  initialMessages: Message[];
+  initialDialogs: InboxDialog[];
+  initialAssignableUsers: PublicUser[];
 };
 
-type MessagesResponse = {
-  messages?: Message[];
+type InboxResponse = {
+  dialogs?: InboxDialog[];
+  assignableUsers?: PublicUser[];
   error?: string;
 };
 
 type SendMessageResponse = {
-  message?: Message;
+  message?: DialogMessage;
   error?: string;
 };
 
@@ -29,68 +32,118 @@ function formatMessageTime(value: string) {
   });
 }
 
-async function loadMessages() {
-  const response = await fetch("/api/messages", {
+async function loadInbox() {
+  const response = await fetch("/api/inbox", {
     cache: "no-store",
   });
-  const payload = (await response.json()) as MessagesResponse;
+  const payload = (await response.json()) as InboxResponse;
 
-  if (!response.ok || !payload.messages) {
-    throw new Error(payload.error ?? "Failed to refresh messages");
+  if (!response.ok || !payload.dialogs || !payload.assignableUsers) {
+    throw new Error(payload.error ?? "Failed to refresh inbox");
   }
 
-  return payload.messages;
+  return payload;
 }
 
-export function Inbox({ currentUser, initialMessages }: InboxProps) {
-  const [messages, setMessages] = useState(initialMessages);
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(
-    initialMessages[0]?.telegram_chat_id ?? null,
-  );
+function upsertLocalMessage(dialogs: InboxDialog[], dialogId: string, message: DialogMessage) {
+  return dialogs
+    .map((dialog) => {
+      if (dialog.id !== dialogId) {
+        return dialog;
+      }
+
+      return {
+        ...dialog,
+        messages: [...dialog.messages, message].sort(
+          (left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime(),
+        ),
+        latest_message_at: message.created_at,
+        updated_at: message.created_at,
+      };
+    })
+    .sort(
+      (left, right) =>
+        new Date(right.latest_message_at).getTime() - new Date(left.latest_message_at).getTime(),
+    );
+}
+
+export function Inbox({ currentUser, initialDialogs, initialAssignableUsers }: InboxProps) {
+  const [dialogs, setDialogs] = useState(initialDialogs);
+  const [assignableUsers, setAssignableUsers] = useState(initialAssignableUsers);
+  const [selectedDialogId, setSelectedDialogId] = useState<string | null>(initialDialogs[0]?.id ?? null);
   const [draft, setDraft] = useState("");
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isManagersOpen, setIsManagersOpen] = useState(false);
 
-  const groups = useMemo(() => groupMessages(messages), [messages]);
-  const selectedGroup =
-    groups.find((group) => group.telegram_chat_id === selectedChatId) ?? groups[0] ?? null;
+  const selectedDialog = dialogs.find((dialog) => dialog.id === selectedDialogId) ?? dialogs[0] ?? null;
+  const assignableManagerId = selectedDialog?.active_assignment?.manager_id ?? "";
 
   useEffect(() => {
-    if (!groups.length) {
-      setSelectedChatId(null);
+    if (!dialogs.length) {
+      setSelectedDialogId(null);
       return;
     }
 
-    const hasSelectedGroup = groups.some((group) => group.telegram_chat_id === selectedChatId);
+    const hasSelectedDialog = dialogs.some((dialog) => dialog.id === selectedDialogId);
 
-    if (!hasSelectedGroup) {
-      setSelectedChatId(groups[0].telegram_chat_id);
+    if (!hasSelectedDialog) {
+      setSelectedDialogId(dialogs[0].id);
     }
-  }, [groups, selectedChatId]);
+  }, [dialogs, selectedDialogId]);
 
-  async function handleRefresh() {
-    setIsRefreshing(true);
+  useEffect(() => {
+    const channel = supabase
+      .channel(`inbox-live-${currentUser.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "realtime_events" },
+        () => {
+          startTransition(() => {
+            void refreshInbox();
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [currentUser.id]);
+
+  const stats = useMemo(
+    () => ({
+      dialogs: dialogs.length,
+      messages: dialogs.reduce((sum, dialog) => sum + dialog.messages.length, 0),
+    }),
+    [dialogs],
+  );
+
+  async function refreshInbox() {
+    setIsSyncing(true);
     setErrorMessage(null);
 
     try {
-      setMessages(await loadMessages());
+      const payload = await loadInbox();
+      setDialogs(payload.dialogs ?? []);
+      setAssignableUsers(payload.assignableUsers ?? []);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to refresh messages";
+      const message = error instanceof Error ? error.message : "Failed to refresh inbox";
       setErrorMessage(message);
 
       if (message === "Unauthorized") {
         window.location.reload();
       }
     } finally {
-      setIsRefreshing(false);
+      setIsSyncing(false);
     }
   }
 
   async function handleSendMessage() {
-    if (!selectedGroup || !draft.trim()) {
+    if (!selectedDialog || !draft.trim()) {
       return;
     }
 
@@ -98,34 +151,59 @@ export function Inbox({ currentUser, initialMessages }: InboxProps) {
     setErrorMessage(null);
 
     try {
-      const response = await fetch("/api/messages/send", {
+      const response = await fetch(`/api/dialogs/${selectedDialog.id}/messages`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          telegram_chat_id: selectedGroup.telegram_chat_id,
           text: draft,
-          username: selectedGroup.username,
-          first_name: selectedGroup.first_name,
-          last_name: selectedGroup.last_name,
         }),
       });
-
       const payload = (await response.json()) as SendMessageResponse;
 
       if (!response.ok || !payload.message) {
         throw new Error(payload.error ?? "Failed to send message");
       }
 
-      const createdMessage = payload.message;
-
-      setMessages((currentMessages) => [createdMessage, ...currentMessages]);
+      setDialogs((currentDialogs) => upsertLocalMessage(currentDialogs, selectedDialog.id, payload.message!));
       setDraft("");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to send message");
     } finally {
       setIsSending(false);
+    }
+  }
+
+  async function handleAssign(managerId: string) {
+    if (!selectedDialog || !managerId) {
+      return;
+    }
+
+    setIsAssigning(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch(`/api/dialogs/${selectedDialog.id}/assign`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          managerId,
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to assign dialog");
+      }
+
+      await refreshInbox();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to assign dialog");
+    } finally {
+      setIsAssigning(false);
     }
   }
 
@@ -157,14 +235,7 @@ export function Inbox({ currentUser, initialMessages }: InboxProps) {
               </div>
 
               <div className="sidebarButtons">
-                <button
-                  type="button"
-                  className="refreshButton"
-                  onClick={handleRefresh}
-                  disabled={isRefreshing}
-                >
-                  {isRefreshing ? "Обновляем..." : "Обновить"}
-                </button>
+                <span className="liveBadge">{isSyncing ? "Синхронизация..." : "Live updates"}</span>
 
                 <button
                   type="button"
@@ -187,50 +258,56 @@ export function Inbox({ currentUser, initialMessages }: InboxProps) {
 
             <div className="sidebarStats">
               <article className="statCard">
-                <span className="statLabel">Users</span>
-                <strong className="statValue">{groups.length}</strong>
+                <span className="statLabel">Dialogs</span>
+                <strong className="statValue">{stats.dialogs}</strong>
               </article>
               <article className="statCard">
                 <span className="statLabel">Messages</span>
-                <strong className="statValue">{messages.length}</strong>
+                <strong className="statValue">{stats.messages}</strong>
               </article>
             </div>
 
             <div className="chatList">
-              {groups.length === 0 ? (
+              {dialogs.length === 0 ? (
                 <section className="emptySidebar">
                   <p className="emptyTitle">Пока пусто</p>
                   <p className="emptyText">
-                    Сообщения появятся здесь после первого диалога в Telegram.
+                    Диалоги появятся здесь после первого сообщения в Telegram.
                   </p>
                 </section>
               ) : (
-                groups.map((group) => {
-                  const lastMessage = group.messages[group.messages.length - 1];
-                  const isActive = group.telegram_chat_id === selectedGroup?.telegram_chat_id;
+                dialogs.map((dialog) => {
+                  const lastMessage = dialog.messages[dialog.messages.length - 1];
+                  const isActive = dialog.id === selectedDialog?.id;
 
                   return (
                     <button
-                      key={group.telegram_chat_id}
+                      key={dialog.id}
                       type="button"
                       className={`chatListItem${isActive ? " active" : ""}`}
-                      onClick={() => setSelectedChatId(group.telegram_chat_id)}
+                      onClick={() => setSelectedDialogId(dialog.id)}
                     >
                       <div className="chatAvatar" aria-hidden="true">
-                        {getDisplayName(group).slice(0, 1).toUpperCase()}
+                        {getClientDisplayName(dialog.client).slice(0, 1).toUpperCase()}
                       </div>
 
                       <div className="chatMeta">
                         <div className="chatMetaTop">
-                          <strong>{getDisplayName(group)}</strong>
-                          <time>{formatMessageTime(group.latest_message_at)}</time>
+                          <strong>{getClientDisplayName(dialog.client)}</strong>
+                          <time>{formatMessageTime(dialog.latest_message_at)}</time>
                         </div>
 
-                        <p className="chatPreview">{getMessagePreview(lastMessage)}</p>
+                        <p className="chatPreview">{getDialogPreview(lastMessage)}</p>
 
                         <p className="chatSecondary">
-                          <span>{group.username ? `@${group.username}` : "без username"}</span>
-                          <span>{group.messages.length} сообщений</span>
+                          <span>
+                            {dialog.client.username ? `@${dialog.client.username}` : "без username"}
+                          </span>
+                          <span>
+                            {dialog.assigned_manager
+                              ? `Ответственный: ${dialog.assigned_manager.full_name || dialog.assigned_manager.email}`
+                              : "Не назначен"}
+                          </span>
                         </p>
                       </div>
                     </button>
@@ -241,27 +318,58 @@ export function Inbox({ currentUser, initialMessages }: InboxProps) {
           </aside>
 
           <section className="conversationPanel">
-            {selectedGroup ? (
+            {selectedDialog ? (
               <>
                 <header className="conversationHeader">
-                  <div>
-                    <p className="conversationEyebrow">Диалог</p>
-                    <h2>{getDisplayName(selectedGroup)}</h2>
-                    <p className="conversationMeta">
-                      <span>chat_id: {selectedGroup.telegram_chat_id}</span>
-                      <span>
-                        {selectedGroup.username ? `@${selectedGroup.username}` : "без username"}
-                      </span>
-                    </p>
+                  <div className="conversationHeaderInner">
+                    <div>
+                      <p className="conversationEyebrow">Диалог</p>
+                      <h2>{getClientDisplayName(selectedDialog.client)}</h2>
+                      <p className="conversationMeta">
+                        <span>chat_id: {selectedDialog.client.telegram_chat_id}</span>
+                        <span>
+                          {selectedDialog.client.username
+                            ? `@${selectedDialog.client.username}`
+                            : "без username"}
+                        </span>
+                        <span>
+                          {selectedDialog.assigned_manager
+                            ? `Назначен: ${selectedDialog.assigned_manager.full_name || selectedDialog.assigned_manager.email}`
+                            : "Назначение не выполнено"}
+                        </span>
+                      </p>
+                    </div>
+
+                    <div className="assignmentBox">
+                      <label className="assignmentLabel" htmlFor="dialog-assignment">
+                        Ответственный
+                      </label>
+                      <select
+                        id="dialog-assignment"
+                        className="assignmentSelect"
+                        value={assignableManagerId}
+                        onChange={(event) => void handleAssign(event.target.value)}
+                        disabled={isAssigning || assignableUsers.length === 0}
+                      >
+                        <option value="" disabled>
+                          Выберите менеджера
+                        </option>
+                        {assignableUsers.map((manager) => (
+                          <option key={manager.id} value={manager.id}>
+                            {manager.full_name || manager.email}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </header>
 
                 <div className="messagesPane">
-                  {selectedGroup.messages.map((message) => (
+                  {selectedDialog.messages.map((message) => (
                     <article
                       key={message.id}
                       className={`bubble ${
-                        message.direction === "outgoing" ? "bubbleOutgoing" : "bubbleIncoming"
+                        message.sender_type === "manager" ? "bubbleOutgoing" : "bubbleIncoming"
                       }`}
                     >
                       <p className="messageText">{message.text || "-"}</p>
@@ -290,7 +398,7 @@ export function Inbox({ currentUser, initialMessages }: InboxProps) {
                       <p className="errorText">{errorMessage}</p>
                     ) : (
                       <span className="hintText">
-                        Ответ появится в боте сразу после отправки.
+                        Обновление списка и сообщений приходит автоматически через realtime.
                       </span>
                     )}
                     <button
@@ -306,9 +414,9 @@ export function Inbox({ currentUser, initialMessages }: InboxProps) {
               </>
             ) : (
               <section className="emptyConversation">
-                <p className="emptyTitle">Нет выбранного диалога</p>
+                <p className="emptyTitle">Нет доступных диалогов</p>
                 <p className="emptyText">
-                  Когда появятся пользователи, можно будет открыть переписку справа.
+                  Диалоги появятся здесь автоматически после новых обращений.
                 </p>
               </section>
             )}

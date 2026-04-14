@@ -1,0 +1,159 @@
+@startuml
+!pragma layout smetana
+
+hide circle
+hide methods
+skinparam linetype ortho
+skinparam shadowing false
+skinparam class {
+  BackgroundColor White
+  ArrowColor Black
+  BorderColor Black
+}
+
+title Incubot Current Target ERD
+
+entity "public.auth_users" as auth_users {
+  *id : uuid <<PK>>
+  --
+  email : varchar(255) <<NOT NULL, UNIQUE>>
+  password_hash : text <<NOT NULL>>
+  created_at : timestamptz <<NOT NULL>>
+  updated_at : timestamptz <<NOT NULL>>
+}
+
+entity "public.managers" as managers {
+  *user_id : uuid <<PK, FK>>
+  --
+  full_name : varchar(255)
+  role : text <<NOT NULL>>
+  is_approved : boolean <<NOT NULL>>
+  approved_at : timestamptz
+  approved_by : uuid <<FK>>
+  last_login_at : timestamptz
+  created_at : timestamptz <<NOT NULL>>
+  updated_at : timestamptz <<NOT NULL>>
+}
+
+note right of managers
+  check role in ('admin', 'manager')
+  user_id -> auth_users.id
+end note
+
+entity "public.clients" as clients {
+  *id : uuid <<PK>>
+  --
+  telegram_user_id : bigint
+  telegram_chat_id : text <<NOT NULL, UNIQUE>>
+  username : varchar(255)
+  first_name : varchar(255)
+  last_name : varchar(255)
+  created_at : timestamptz <<NOT NULL>>
+  updated_at : timestamptz <<NOT NULL>>
+}
+
+entity "public.dialogs" as dialogs {
+  *id : uuid <<PK>>
+  --
+  client_id : uuid <<FK>>
+  status : text <<NOT NULL>>
+  created_at : timestamptz <<NOT NULL>>
+  updated_at : timestamptz <<NOT NULL>>
+  closed_at : timestamptz
+}
+
+note right of dialogs
+  check status in ('open', 'closed')
+  one open dialog per client
+end note
+
+entity "public.messages" as messages {
+  *id : uuid <<PK>>
+  --
+  dialog_id : uuid <<FK>>
+  client_id : uuid <<FK, NULL>>
+  manager_id : uuid <<FK, NULL>>
+  sender_type : text <<NOT NULL>>
+  text : text <<NOT NULL>>
+  created_at : timestamptz <<NOT NULL>>
+}
+
+note right of messages
+  check sender_type in ('client', 'manager')
+  exactly one sender FK is filled
+end note
+
+entity "public.dialog_assignments" as dialog_assignments {
+  *id : uuid <<PK>>
+  --
+  dialog_id : uuid <<FK>>
+  manager_id : uuid <<FK>>
+  assigned_by : uuid <<FK>>
+  assigned_at : timestamptz <<NOT NULL>>
+  unassigned_at : timestamptz
+  is_active : boolean <<NOT NULL>>
+  updated_at : timestamptz <<NOT NULL>>
+}
+
+note right of dialog_assignments
+  history table
+  one active assignment per dialog
+end note
+
+entity "public.realtime_events" as realtime_events {
+  *id : bigint <<PK>>
+  --
+  entity_type : text <<NOT NULL>>
+  entity_id : uuid
+  dialog_id : uuid
+  action : text <<NOT NULL>>
+  created_at : timestamptz <<NOT NULL>>
+}
+
+note right of realtime_events
+  lightweight websocket signal table
+  used only for UI invalidation
+end note
+
+entity "public.admin_users_legacy" as admin_users_legacy {
+  *id : uuid <<PK>>
+  --
+  email : varchar(255)
+  password_hash : text
+  full_name : varchar(255)
+  role : text
+  is_approved : boolean
+}
+
+entity "public.messages_legacy" as messages_legacy {
+  *id : uuid <<PK>>
+  --
+  telegram_chat_id : text
+  username : varchar(255)
+  first_name : varchar(255)
+  last_name : varchar(255)
+  text : text
+  direction : text
+  created_at : timestamptz
+}
+
+note right of admin_users_legacy
+  backup after migration
+end note
+
+note right of messages_legacy
+  backup after migration
+end note
+
+auth_users ||--|| managers : user_id
+managers }o--|| managers : approved_by
+clients ||--o{ dialogs : client_id
+dialogs ||--o{ messages : dialog_id
+clients ||--o{ messages : client_id
+managers ||--o{ messages : manager_id
+dialogs ||--o{ dialog_assignments : dialog_id
+managers ||--o{ dialog_assignments : manager_id
+managers ||--o{ dialog_assignments : assigned_by
+dialogs ||--o{ realtime_events : dialog_id
+
+@enduml

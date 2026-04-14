@@ -126,6 +126,19 @@ h1 {
   color: var(--accent);
 }
 
+.liveBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(145, 245, 190, 0.12);
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .sendButton,
 .primaryWideButton {
   background: var(--accent);
@@ -308,6 +321,13 @@ h1 {
   backdrop-filter: blur(18px);
 }
 
+.conversationHeaderInner {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+}
+
 .conversationEyebrow {
   margin: 0 0 6px;
   color: var(--accent);
@@ -370,6 +390,24 @@ h1 {
   background: rgba(17, 27, 33, 0.92);
 }
 
+.assignmentBox {
+  min-width: min(300px, 100%);
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.assignmentLabel {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .composerLabel {
   display: block;
   margin-bottom: 10px;
@@ -378,6 +416,7 @@ h1 {
 }
 
 .composerInput,
+.assignmentSelect,
 .authInput {
   width: 100%;
   border: 1px solid var(--border);
@@ -397,11 +436,16 @@ h1 {
   padding: 14px 16px;
 }
 
+.assignmentSelect {
+  padding: 12px 14px;
+}
+
 .authInput.compact {
   padding: 12px 14px;
 }
 
 .composerInput:focus,
+.assignmentSelect:focus,
 .authInput:focus {
   outline: 2px solid rgba(83, 189, 235, 0.28);
   border-color: rgba(83, 189, 235, 0.36);
@@ -626,6 +670,7 @@ h1 {
 
   .sidebarTop,
   .authLinks,
+  .conversationHeaderInner,
   .managerCardTop,
   .modalHeader {
     flex-direction: column;
@@ -651,6 +696,10 @@ h1 {
   .authTabs {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .assignmentBox {
+    min-width: 100%;
   }
 
   .authTabs {
