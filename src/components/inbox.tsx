@@ -45,6 +45,18 @@ async function loadInbox() {
   return payload;
 }
 
+function getMessageBubbleClass(senderType: DialogMessage["sender_type"]) {
+  if (senderType === "manager") {
+    return "bubbleOutgoing";
+  }
+
+  if (senderType === "assistant") {
+    return "bubbleAssistant";
+  }
+
+  return "bubbleIncoming";
+}
+
 function upsertLocalMessage(dialogs: InboxDialog[], dialogId: string, message: DialogMessage) {
   return dialogs
     .map((dialog) => {
@@ -335,7 +347,7 @@ export function Inbox({ currentUser, initialDialogs, initialAssignableUsers }: I
                         <span>
                           {selectedDialog.assigned_manager
                             ? `Назначен: ${selectedDialog.assigned_manager.full_name || selectedDialog.assigned_manager.email}`
-                            : "Назначение не выполнено"}
+                            : "AI fallback активен до назначения менеджера"}
                         </span>
                       </p>
                     </div>
@@ -368,9 +380,7 @@ export function Inbox({ currentUser, initialDialogs, initialAssignableUsers }: I
                   {selectedDialog.messages.map((message) => (
                     <article
                       key={message.id}
-                      className={`bubble ${
-                        message.sender_type === "manager" ? "bubbleOutgoing" : "bubbleIncoming"
-                      }`}
+                      className={`bubble ${getMessageBubbleClass(message.sender_type)}`}
                     >
                       <p className="messageText">{message.text || "-"}</p>
                       <time className="messageTime">

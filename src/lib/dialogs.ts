@@ -1,7 +1,7 @@
 import type { PublicUser } from "@/lib/auth";
 
 export type DialogStatus = "open" | "closed";
-export type SenderType = "client" | "manager";
+export type SenderType = "client" | "manager" | "assistant";
 
 export type ClientRecord = {
   id: string;

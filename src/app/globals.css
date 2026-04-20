@@ -375,6 +375,15 @@ h1 {
   border-top-right-radius: 8px;
 }
 
+.bubbleAssistant {
+  justify-self: start;
+  background:
+    linear-gradient(180deg, rgba(83, 189, 235, 0.14), rgba(83, 189, 235, 0.06)),
+    var(--panel-2);
+  border-color: rgba(83, 189, 235, 0.22);
+  border-top-left-radius: 8px;
+}
+
 .messageText {
   margin: 0 0 12px;
   color: var(--text);
