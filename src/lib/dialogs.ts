@@ -10,6 +10,7 @@ export type ClientRecord = {
   username: string | null;
   first_name: string | null;
   last_name: string | null;
+  ai_enabled: boolean;
   created_at: string;
   updated_at: string;
 };

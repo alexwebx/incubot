@@ -86,7 +86,7 @@ async function getClientsByIds(clientIds: string[]) {
   const { data, error } = await getSupabaseAdmin()
     .from("clients")
     .select(
-      "id, telegram_user_id, telegram_chat_id, username, first_name, last_name, created_at, updated_at",
+      "id, telegram_user_id, telegram_chat_id, username, first_name, last_name, ai_enabled, created_at, updated_at",
     )
     .in("id", clientIds);
 
@@ -268,7 +268,7 @@ export async function upsertTelegramClient(input: TelegramClientInput) {
       { onConflict: "telegram_chat_id" },
     )
     .select(
-      "id, telegram_user_id, telegram_chat_id, username, first_name, last_name, created_at, updated_at",
+      "id, telegram_user_id, telegram_chat_id, username, first_name, last_name, ai_enabled, created_at, updated_at",
     )
     .single<ClientRecord>();
 

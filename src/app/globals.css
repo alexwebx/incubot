@@ -120,6 +120,11 @@ h1 {
     color 160ms ease;
 }
 
+.dangerButton {
+  color: var(--danger);
+  background: rgba(255, 143, 143, 0.1);
+}
+
 .refreshButton,
 .ghostButton {
   background: rgba(83, 189, 235, 0.12);
@@ -409,6 +414,21 @@ h1 {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.checkboxLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.checkboxLine input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
 .assignmentLabel {
   font-size: 12px;
   font-weight: 700;
@@ -620,6 +640,74 @@ h1 {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.knowledgeModal {
+  width: min(1180px, 100%);
+}
+
+.knowledgeGrid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.9fr) minmax(0, 1.4fr);
+  gap: 18px;
+  min-height: min(680px, calc(100vh - 210px));
+}
+
+.knowledgeList,
+.knowledgeEditor {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.knowledgeList {
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.knowledgeItem {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.knowledgeItem.active {
+  border-color: rgba(83, 189, 235, 0.34);
+  background: rgba(83, 189, 235, 0.1);
+}
+
+.knowledgeItem > button {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.knowledgeItem strong {
+  font-size: 15px;
+}
+
+.knowledgeItem span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.knowledgeActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.knowledgeTextarea {
+  min-height: 360px;
+}
+
 .managerCard.self {
   max-width: 560px;
 }
@@ -713,6 +801,11 @@ h1 {
 
   .authTabs {
     display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .knowledgeGrid,
+  .knowledgeActions {
     grid-template-columns: 1fr;
   }
 

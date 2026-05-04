@@ -22,6 +22,7 @@ type TelegramUpdate = {
 type ClientRow = {
   id: string;
   telegram_chat_id: string;
+  ai_enabled: boolean;
 };
 
 type DialogRow = {
@@ -46,11 +47,17 @@ type KnowledgeMatch = {
   similarity: number;
 };
 
+type CreatedMessageRow = {
+  id: string;
+};
+
+type IntentName = "greeting" | "thanks" | "agreement" | "goodbye" | "manager_request" | "unknown";
+
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const telegramBotToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
 const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY");
-const openRouterModel = Deno.env.get("OPENROUTER_MODEL") ?? "deepseek/deepseek-chat";
+const openRouterModel = Deno.env.get("OPENROUTER_MODEL") ?? "openai/gpt-4o-mini";
 const openRouterEmbeddingModel =
   Deno.env.get("OPENROUTER_EMBEDDING_MODEL") ?? "openai/text-embedding-3-small";
 
@@ -88,6 +95,106 @@ function buildKnowledgeContext(matches: KnowledgeMatch[]) {
         `Источник ${index + 1}: ${match.title} (${match.source_key}, similarity=${match.similarity.toFixed(3)})\n${match.content}`,
     )
     .join("\n\n");
+}
+
+function classifyIntent(text: string): IntentName {
+  const normalized = text
+    .toLowerCase()
+    .replace(/[!?.,:;()[\]{}"']/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return "unknown";
+  }
+
+  const hasAny = (tokens: string[]) => tokens.some((token) => normalized.includes(token));
+
+  if (
+    hasAny([
+      "оператор",
+      "менеджер",
+      "человек",
+      "живой",
+      "сотрудник",
+      "позовите",
+      "свяжитесь",
+      "перезвоните",
+    ])
+  ) {
+    return "manager_request";
+  }
+
+  if (
+    normalized.startsWith("привет") ||
+    normalized.startsWith("здравствуйте") ||
+    normalized.startsWith("добрый день") ||
+    normalized.startsWith("доброе утро") ||
+    normalized.startsWith("добрый вечер") ||
+    normalized.startsWith("хай") ||
+    normalized.startsWith("hello") ||
+    normalized.startsWith("hi")
+  ) {
+    return "greeting";
+  }
+
+  if (
+    normalized.startsWith("спасибо") ||
+    normalized.startsWith("благодарю") ||
+    normalized.startsWith("thanks") ||
+    normalized.startsWith("thank you") ||
+    normalized.startsWith("ок спасибо") ||
+    normalized.startsWith("понял спасибо")
+  ) {
+    return "thanks";
+  }
+
+  if (
+    ["да", "ок", "окей", "хорошо", "понял", "поняла", "согласен", "согласна", "верно", "угу"].includes(
+      normalized,
+    )
+  ) {
+    return "agreement";
+  }
+
+  if (
+    normalized.startsWith("пока") ||
+    normalized.startsWith("до свидания") ||
+    normalized.startsWith("всего доброго") ||
+    normalized.startsWith("до встречи") ||
+    normalized.startsWith("goodbye") ||
+    normalized.startsWith("bye")
+  ) {
+    return "goodbye";
+  }
+
+  return "unknown";
+}
+
+function getIntentReply(intent: IntentName, firstName: string | null) {
+  if (intent === "greeting") {
+    return firstName
+      ? `Привет, ${firstName}. Напишите вопрос, и я отвечу по базе знаний или передам диалог менеджеру.`
+      : "Привет. Напишите вопрос, и я отвечу по базе знаний или передам диалог менеджеру.";
+  }
+
+  if (intent === "thanks") {
+    return "Пожалуйста. Если появится ещё вопрос, напишите сюда.";
+  }
+
+  if (intent === "agreement") {
+    return "Принял. Если нужно уточнить детали, напишите вопрос одним сообщением.";
+  }
+
+  if (intent === "goodbye") {
+    return "До свидания. Будем на связи.";
+  }
+
+  if (intent === "manager_request") {
+    return "Передам диалог менеджеру. Он ответит здесь, как только подключится.";
+  }
+
+  return null;
 }
 
 async function sendTelegramMessage(
@@ -132,7 +239,7 @@ async function upsertClient(input: {
       },
       { onConflict: "telegram_chat_id" },
     )
-    .select("id, telegram_chat_id")
+    .select("id, telegram_chat_id, ai_enabled")
     .single<ClientRow>();
 
   if (error) {
@@ -196,7 +303,7 @@ async function createMessage(input: {
       created_at: now,
     })
     .select("id")
-    .single<{ id: string }>();
+    .single<CreatedMessageRow>();
 
   if (error) {
     throw new Error(error.message);
@@ -225,14 +332,14 @@ async function storeIncomingMessage(input: {
   const client = await upsertClient(input);
   const dialog = await findOrCreateOpenDialog(client.id);
 
-  await createMessage({
+  const message = await createMessage({
     dialogId: dialog.id,
     senderType: "client",
     text: input.text,
     clientId: client.id,
   });
 
-  return { client, dialog };
+  return { client, dialog, message };
 }
 
 async function getActiveAssignment(dialogId: string) {
@@ -364,6 +471,50 @@ async function generateAssistantReply(input: {
   return content;
 }
 
+async function createAiDecision(input: {
+  dialogId: string;
+  clientId: string;
+  messageId: string;
+  responseMessageId?: string | null;
+  decisionType: "intent_reply" | "kb_answer" | "manager_fallback" | "skipped";
+  intent: IntentName;
+  aiEnabled: boolean;
+  managerAssigned: boolean;
+  matches?: KnowledgeMatch[];
+  userText: string;
+  assistantText?: string | null;
+  fallbackReason?: string | null;
+  errorMessage?: string | null;
+}) {
+  const matches = input.matches ?? [];
+  const { error } = await supabase.from("ai_decisions").insert({
+    dialog_id: input.dialogId,
+    client_id: input.clientId,
+    message_id: input.messageId,
+    response_message_id: input.responseMessageId ?? null,
+    decision_type: input.decisionType,
+    intent: input.intent,
+    ai_enabled: input.aiEnabled,
+    manager_assigned: input.managerAssigned,
+    model: openRouterModel,
+    embedding_model: openRouterEmbeddingModel,
+    matched_chunk_ids: matches.map((match) => match.chunk_id),
+    matched_document_ids: Array.from(new Set(matches.map((match) => match.document_id))),
+    max_similarity: matches[0]?.similarity ?? null,
+    user_text: input.userText,
+    assistant_text: input.assistantText ?? null,
+    fallback_reason: input.fallbackReason ?? null,
+    error_message: input.errorMessage ?? null,
+    metadata: {
+      source: "telegram-webhook",
+    },
+  });
+
+  if (error) {
+    console.error("ai decision insert error", error.message);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", {
@@ -449,7 +600,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { dialog } = await storeIncomingMessage({
+    const { client, dialog, message } = await storeIncomingMessage({
       telegramUserId,
       telegramChatId: String(chatId),
       username,
@@ -459,27 +610,80 @@ Deno.serve(async (req) => {
     });
 
     const activeAssignment = await getActiveAssignment(dialog.id);
+    const managerAssigned = Boolean(activeAssignment);
+    const intent = classifyIntent(trimmedText);
 
-    if (!activeAssignment) {
+    if (activeAssignment) {
+      await createAiDecision({
+        dialogId: dialog.id,
+        clientId: client.id,
+        messageId: message.id,
+        decisionType: "skipped",
+        intent,
+        aiEnabled: client.ai_enabled,
+        managerAssigned,
+        userText: trimmedText,
+        fallbackReason: "manager_assigned",
+      });
+    } else {
       let assistantReply =
         "Я получил сообщение и передам его менеджеру. Если вопрос срочный, напишите его максимально конкретно одним сообщением.";
+      let decisionType: "intent_reply" | "kb_answer" | "manager_fallback" = "manager_fallback";
+      let fallbackReason: string | null = null;
+      let assistantErrorMessage: string | null = null;
+      let matches: KnowledgeMatch[] = [];
 
-      try {
-        const matches = await searchKnowledgeBase(trimmedText);
-        assistantReply = await generateAssistantReply({
-          firstName,
-          messageText: trimmedText,
-          matches,
-        });
-      } catch (assistantError) {
-        console.error("assistant fallback error", assistantError);
+      const intentReply = getIntentReply(intent, firstName);
+
+      if (!client.ai_enabled) {
+        fallbackReason = "client_ai_disabled";
+      } else if (intentReply) {
+        assistantReply = intentReply;
+        decisionType = intent === "manager_request" ? "manager_fallback" : "intent_reply";
+        fallbackReason = intent === "manager_request" ? "manager_requested" : null;
+      } else {
+        try {
+          matches = await searchKnowledgeBase(trimmedText);
+
+          if (matches.length === 0) {
+            fallbackReason = "no_relevant_knowledge";
+          } else {
+            assistantReply = await generateAssistantReply({
+              firstName,
+              messageText: trimmedText,
+              matches,
+            });
+            decisionType = "kb_answer";
+          }
+        } catch (assistantError) {
+          assistantErrorMessage =
+            assistantError instanceof Error ? assistantError.message : "Unknown assistant error";
+          fallbackReason = "assistant_error";
+          console.error("assistant fallback error", assistantError);
+        }
       }
 
       await sendTelegramMessage(chatId, assistantReply, messageId);
-      await createMessage({
+      const responseMessage = await createMessage({
         dialogId: dialog.id,
         senderType: "assistant",
         text: assistantReply,
+      });
+
+      await createAiDecision({
+        dialogId: dialog.id,
+        clientId: client.id,
+        messageId: message.id,
+        responseMessageId: responseMessage.id,
+        decisionType,
+        intent,
+        aiEnabled: client.ai_enabled,
+        managerAssigned,
+        matches,
+        userText: trimmedText,
+        assistantText: assistantReply,
+        fallbackReason,
+        errorMessage: assistantErrorMessage,
       });
     }
   } catch (error) {

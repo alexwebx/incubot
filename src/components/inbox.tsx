@@ -4,6 +4,7 @@ import { startTransition, useEffect, useMemo, useState } from "react";
 import type { PublicUser } from "@/lib/auth";
 import { type DialogMessage, type InboxDialog, getClientDisplayName, getDialogPreview } from "@/lib/dialogs";
 import { supabase } from "@/lib/supabase";
+import { KnowledgeModal } from "@/components/knowledge-modal";
 import { ManagersModal } from "@/components/managers-modal";
 
 type InboxProps = {
@@ -90,6 +91,7 @@ export function Inbox({ currentUser, initialDialogs, initialAssignableUsers }: I
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isManagersOpen, setIsManagersOpen] = useState(false);
+  const [isKnowledgeOpen, setIsKnowledgeOpen] = useState(false);
 
   const selectedDialog = dialogs.find((dialog) => dialog.id === selectedDialogId) ?? dialogs[0] ?? null;
   const assignableManagerId = selectedDialog?.active_assignment?.manager_id ?? "";
@@ -219,6 +221,47 @@ export function Inbox({ currentUser, initialDialogs, initialAssignableUsers }: I
     }
   }
 
+  async function handleClientAiToggle(aiEnabled: boolean) {
+    if (!selectedDialog) {
+      return;
+    }
+
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch(`/api/clients/${selectedDialog.client.id}/ai`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          aiEnabled,
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to update AI setting");
+      }
+
+      setDialogs((currentDialogs) =>
+        currentDialogs.map((dialog) =>
+          dialog.client.id === selectedDialog.client.id
+            ? {
+                ...dialog,
+                client: {
+                  ...dialog.client,
+                  ai_enabled: aiEnabled,
+                },
+              }
+            : dialog,
+        ),
+      );
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to update AI setting");
+    }
+  }
+
   async function handleLogout() {
     setIsLoggingOut(true);
 
@@ -256,6 +299,16 @@ export function Inbox({ currentUser, initialDialogs, initialAssignableUsers }: I
                 >
                   {currentUser.role === "admin" ? "Менеджеры" : "Профиль"}
                 </button>
+
+                {currentUser.role === "admin" ? (
+                  <button
+                    type="button"
+                    className="ghostButton"
+                    onClick={() => setIsKnowledgeOpen(true)}
+                  >
+                    База знаний
+                  </button>
+                ) : null}
 
                 <button
                   type="button"
@@ -344,6 +397,7 @@ export function Inbox({ currentUser, initialDialogs, initialAssignableUsers }: I
                             ? `@${selectedDialog.client.username}`
                             : "без username"}
                         </span>
+                        <span>AI: {selectedDialog.client.ai_enabled ? "включён" : "выключен"}</span>
                         <span>
                           {selectedDialog.assigned_manager
                             ? `Назначен: ${selectedDialog.assigned_manager.full_name || selectedDialog.assigned_manager.email}`
@@ -372,6 +426,17 @@ export function Inbox({ currentUser, initialDialogs, initialAssignableUsers }: I
                           </option>
                         ))}
                       </select>
+
+                      {currentUser.role === "admin" ? (
+                        <label className="checkboxLine">
+                          <input
+                            type="checkbox"
+                            checked={selectedDialog.client.ai_enabled}
+                            onChange={(event) => void handleClientAiToggle(event.target.checked)}
+                          />
+                          <span>AI для клиента</span>
+                        </label>
+                      ) : null}
                     </div>
                   </div>
                 </header>
@@ -439,6 +504,7 @@ export function Inbox({ currentUser, initialDialogs, initialAssignableUsers }: I
         isOpen={isManagersOpen}
         onClose={() => setIsManagersOpen(false)}
       />
+      <KnowledgeModal isOpen={isKnowledgeOpen} onClose={() => setIsKnowledgeOpen(false)} />
     </>
   );
 }

@@ -258,6 +258,9 @@ async function main() {
           content,
           content_hash: contentHash,
           is_published: true,
+          source_type: "file",
+          index_status: "pending",
+          index_error: null,
           metadata: {
             source_path: relativePath,
             synced_at: new Date().toISOString(),
@@ -299,6 +302,19 @@ async function main() {
 
     if (insertChunksError) {
       throw new Error(insertChunksError.message);
+    }
+
+    const { error: updateIndexStatusError } = await supabase
+      .from("knowledge_documents")
+      .update({
+        index_status: "indexed",
+        index_error: null,
+        last_indexed_at: new Date().toISOString(),
+      })
+      .eq("id", document.id);
+
+    if (updateIndexStatusError) {
+      throw new Error(updateIndexStatusError.message);
     }
 
     summary.push(`${relativePath}: ${chunks.length} chunks`);
