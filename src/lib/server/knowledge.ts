@@ -10,6 +10,35 @@ type KnowledgeChunkRow = {
   document_id: string;
 };
 
+type LegacyKnowledgeDocumentRow = {
+  id: string;
+  source_key: string;
+  slug: string;
+  title: string;
+  content: string;
+  content_hash: string;
+  is_published: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+function isMissingColumnError(error: { code?: string; message: string }) {
+  return error.code === "42703" || error.message.includes("does not exist");
+}
+
+function toKnowledgeDocumentRow(document: LegacyKnowledgeDocumentRow): KnowledgeDocumentRow {
+  return {
+    ...document,
+    source_type: "admin",
+    created_by: null,
+    updated_by: null,
+    last_indexed_at: null,
+    index_status: "indexed",
+    index_error: null,
+  };
+}
+
 function normalizeWhitespace(value: string) {
   return value.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -157,7 +186,7 @@ async function hydrateChunkCounts(documents: KnowledgeDocumentRow[]) {
 }
 
 export async function listKnowledgeDocuments() {
-  const { data, error } = await getSupabaseAdmin()
+  const queryWithIndexColumns = await getSupabaseAdmin()
     .from("knowledge_documents")
     .select(
       [
@@ -181,15 +210,43 @@ export async function listKnowledgeDocuments() {
     )
     .order("updated_at", { ascending: false });
 
+  if (!queryWithIndexColumns.error) {
+    return hydrateChunkCounts((queryWithIndexColumns.data ?? []) as unknown as KnowledgeDocumentRow[]);
+  }
+
+  if (!isMissingColumnError(queryWithIndexColumns.error)) {
+    throw new Error(queryWithIndexColumns.error.message);
+  }
+
+  const { data, error } = await getSupabaseAdmin()
+    .from("knowledge_documents")
+    .select(
+      [
+        "id",
+        "source_key",
+        "slug",
+        "title",
+        "content",
+        "content_hash",
+        "is_published",
+        "metadata",
+        "created_at",
+        "updated_at",
+      ].join(", "),
+    )
+    .order("updated_at", { ascending: false });
+
   if (error) {
     throw new Error(error.message);
   }
 
-  return hydrateChunkCounts((data ?? []) as unknown as KnowledgeDocumentRow[]);
+  return hydrateChunkCounts(
+    ((data ?? []) as unknown as LegacyKnowledgeDocumentRow[]).map(toKnowledgeDocumentRow),
+  );
 }
 
 export async function findKnowledgeDocument(documentId: string) {
-  const { data, error } = await getSupabaseAdmin()
+  const queryWithIndexColumns = await getSupabaseAdmin()
     .from("knowledge_documents")
     .select(
       [
@@ -214,6 +271,38 @@ export async function findKnowledgeDocument(documentId: string) {
     .eq("id", documentId)
     .maybeSingle<KnowledgeDocumentRow>();
 
+  if (!queryWithIndexColumns.error) {
+    if (!queryWithIndexColumns.data) {
+      return null;
+    }
+
+    const [document] = await hydrateChunkCounts([queryWithIndexColumns.data]);
+    return document;
+  }
+
+  if (!isMissingColumnError(queryWithIndexColumns.error)) {
+    throw new Error(queryWithIndexColumns.error.message);
+  }
+
+  const { data, error } = await getSupabaseAdmin()
+    .from("knowledge_documents")
+    .select(
+      [
+        "id",
+        "source_key",
+        "slug",
+        "title",
+        "content",
+        "content_hash",
+        "is_published",
+        "metadata",
+        "created_at",
+        "updated_at",
+      ].join(", "),
+    )
+    .eq("id", documentId)
+    .maybeSingle<LegacyKnowledgeDocumentRow>();
+
   if (error) {
     throw new Error(error.message);
   }
@@ -222,7 +311,7 @@ export async function findKnowledgeDocument(documentId: string) {
     return null;
   }
 
-  const [document] = await hydrateChunkCounts([data]);
+  const [document] = await hydrateChunkCounts([toKnowledgeDocumentRow(data)]);
   return document;
 }
 
@@ -244,7 +333,7 @@ export async function createKnowledgeDocument(input: {
   }
 
   const sourceKey = createSourceKey(title);
-  const { data, error } = await getSupabaseAdmin()
+  let insertResult = await getSupabaseAdmin()
     .from("knowledge_documents")
     .insert({
       source_key: sourceKey,
@@ -264,11 +353,29 @@ export async function createKnowledgeDocument(input: {
     .select("id")
     .single<{ id: string }>();
 
-  if (error) {
-    throw new Error(error.message);
+  if (insertResult.error && isMissingColumnError(insertResult.error)) {
+    insertResult = await getSupabaseAdmin()
+      .from("knowledge_documents")
+      .insert({
+        source_key: sourceKey,
+        slug: sourceKey.replace(/^admin\//, ""),
+        title,
+        content,
+        content_hash: contentHash(content),
+        is_published: input.isPublished,
+        metadata: {
+          source: "admin",
+        },
+      })
+      .select("id")
+      .single<{ id: string }>();
   }
 
-  return reindexKnowledgeDocument(data.id, input.currentUser);
+  if (insertResult.error) {
+    throw new Error(insertResult.error.message);
+  }
+
+  return reindexKnowledgeDocument(insertResult.data.id, input.currentUser);
 }
 
 export async function updateKnowledgeDocument(
@@ -299,7 +406,7 @@ export async function updateKnowledgeDocument(
 
   const nextHash = contentHash(content);
   const shouldReindex = existingDocument.content_hash !== nextHash;
-  const { error } = await getSupabaseAdmin()
+  let updateResult = await getSupabaseAdmin()
     .from("knowledge_documents")
     .update({
       title,
@@ -313,8 +420,21 @@ export async function updateKnowledgeDocument(
     })
     .eq("id", documentId);
 
-  if (error) {
-    throw new Error(error.message);
+  if (updateResult.error && isMissingColumnError(updateResult.error)) {
+    updateResult = await getSupabaseAdmin()
+      .from("knowledge_documents")
+      .update({
+        title,
+        slug: createSlug(title) || existingDocument.slug,
+        content,
+        content_hash: nextHash,
+        is_published: input.isPublished,
+      })
+      .eq("id", documentId);
+  }
+
+  if (updateResult.error) {
+    throw new Error(updateResult.error.message);
   }
 
   if (shouldReindex) {
@@ -388,11 +508,11 @@ export async function reindexKnowledgeDocument(documentId: string, currentUser: 
       })
       .eq("id", documentId);
 
-    if (updateDocumentError) {
+    if (updateDocumentError && !isMissingColumnError(updateDocumentError)) {
       throw new Error(updateDocumentError.message);
     }
   } catch (error) {
-    await getSupabaseAdmin()
+    const updateFailedResult = await getSupabaseAdmin()
       .from("knowledge_documents")
       .update({
         index_status: "failed",
@@ -400,6 +520,10 @@ export async function reindexKnowledgeDocument(documentId: string, currentUser: 
         updated_by: currentUser.id,
       })
       .eq("id", documentId);
+
+    if (updateFailedResult.error && !isMissingColumnError(updateFailedResult.error)) {
+      console.error("knowledge index status update error", updateFailedResult.error.message);
+    }
 
     throw error;
   }
