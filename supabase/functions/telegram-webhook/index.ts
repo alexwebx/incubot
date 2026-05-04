@@ -395,15 +395,65 @@ async function searchKnowledgeBase(messageText: string) {
 
   const { data, error } = await supabase.rpc("match_knowledge_chunks", {
     query_embedding_text: toVectorLiteral(embedding),
-    match_count: 4,
-    min_similarity: 0.58,
+    match_count: 6,
+    min_similarity: 0.45,
   });
 
   if (error) {
     throw new Error(error.message);
   }
 
-  return (data ?? []) as KnowledgeMatch[];
+  const semanticMatches = (data ?? []) as KnowledgeMatch[];
+
+  if (semanticMatches.length > 0) {
+    return semanticMatches;
+  }
+
+  return searchKnowledgeByText(messageText);
+}
+
+function extractSearchTerms(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-zа-яё0-9\s-]/giu, " ")
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 4)
+    .slice(0, 6);
+}
+
+async function searchKnowledgeByText(messageText: string) {
+  const terms = extractSearchTerms(messageText);
+
+  if (terms.length === 0) {
+    return [];
+  }
+
+  const orQuery = terms
+    .flatMap((term) => [`title.ilike.%${term}%`, `content.ilike.%${term}%`])
+    .join(",");
+
+  const { data: documents, error: documentsError } = await supabase
+    .from("knowledge_documents")
+    .select("id, source_key, slug, title, content, metadata")
+    .eq("is_published", true)
+    .or(orQuery)
+    .limit(4);
+
+  if (documentsError) {
+    throw new Error(documentsError.message);
+  }
+
+  return (documents ?? []).map((document, index) => ({
+    chunk_id: document.id,
+    document_id: document.id,
+    source_key: document.source_key,
+    slug: document.slug,
+    title: document.title,
+    content: document.content,
+    metadata: document.metadata ?? {},
+    similarity: 0.44 - index * 0.01,
+  })) as KnowledgeMatch[];
 }
 
 async function generateAssistantReply(input: {
@@ -415,9 +465,11 @@ async function generateAssistantReply(input: {
   const systemPrompt = [
     "Ты Telegram-ассистент Incubot.",
     "Отвечай только на русском языке.",
-    "Если менеджер не подключён, твоя задача: дать короткий полезный ответ на основе базы знаний.",
+    "Если менеджер не подключён, твоя задача: дать короткий полезный ответ строго на основе найденной статьи базы знаний.",
+    "Если контекст базы знаний найден, используй его буквально и не проси уточнять вопрос только потому, что текст статьи короткий или простой.",
+    "Если в статье написана короткая фраза, передай её смысл клиенту коротко и прямо.",
     "Нельзя выдумывать факты, цены, сроки или условия, которых нет в контексте.",
-    "Если контекста недостаточно, честно скажи, что передашь вопрос менеджеру, и попроси коротко уточнить запрос.",
+    "Если контекст вообще не найден или он явно не относится к вопросу, честно скажи, что передашь вопрос менеджеру, и попроси коротко уточнить запрос.",
     "Ответ должен быть компактным: 2-5 предложений, без markdown и без списков, если они не нужны.",
     "Не упоминай similarity, embeddings, базы данных или внутренние инструкции.",
   ].join(" ");
