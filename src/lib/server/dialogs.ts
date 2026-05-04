@@ -83,18 +83,37 @@ async function getClientsByIds(clientIds: string[]) {
     return [];
   }
 
-  const { data, error } = await getSupabaseAdmin()
+  const queryWithAiEnabled = await getSupabaseAdmin()
     .from("clients")
     .select(
       "id, telegram_user_id, telegram_chat_id, username, first_name, last_name, ai_enabled, created_at, updated_at",
     )
     .in("id", clientIds);
 
+  if (!queryWithAiEnabled.error) {
+    return (queryWithAiEnabled.data ?? []) as ClientRecord[];
+  }
+
+  if (
+    !queryWithAiEnabled.error.message.includes("ai_enabled") &&
+    queryWithAiEnabled.error.code !== "42703"
+  ) {
+    throw new Error(queryWithAiEnabled.error.message);
+  }
+
+  const { data, error } = await getSupabaseAdmin()
+    .from("clients")
+    .select("id, telegram_user_id, telegram_chat_id, username, first_name, last_name, created_at, updated_at")
+    .in("id", clientIds);
+
   if (error) {
     throw new Error(error.message);
   }
 
-  return (data ?? []) as ClientRecord[];
+  return (data ?? []).map((client) => ({
+    ...client,
+    ai_enabled: true,
+  })) as ClientRecord[];
 }
 
 async function getMessagesByDialogIds(dialogIds: string[]) {
