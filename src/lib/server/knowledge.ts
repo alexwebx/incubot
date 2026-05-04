@@ -24,7 +24,13 @@ type LegacyKnowledgeDocumentRow = {
 };
 
 function isMissingColumnError(error: { code?: string; message: string }) {
-  return error.code === "42703" || error.message.includes("does not exist");
+  return (
+    error.code === "42703" ||
+    error.code === "PGRST204" ||
+    error.message.includes("does not exist") ||
+    error.message.includes("Could not find") ||
+    error.message.includes("schema cache")
+  );
 }
 
 function toKnowledgeDocumentRow(document: LegacyKnowledgeDocumentRow): KnowledgeDocumentRow {
