@@ -5,7 +5,7 @@ import type { KnowledgeDocument } from "@/lib/knowledge";
 
 type KnowledgeModalProps = {
   isOpen: boolean;
-  onClose: () => void;
+  onClose?: () => void;
 };
 
 type KnowledgeResponse = {
@@ -215,9 +215,11 @@ export function KnowledgeModal({ isOpen, onClose }: KnowledgeModalProps) {
             <p className="eyebrow">Knowledge Base</p>
             <h2>База знаний</h2>
           </div>
-          <button type="button" className="ghostButton" onClick={onClose}>
-            Закрыть
-          </button>
+          {onClose ? (
+            <button type="button" className="ghostButton" onClick={onClose}>
+              Закрыть
+            </button>
+          ) : null}
         </div>
 
         {errorMessage ? <p className="errorBanner">{errorMessage}</p> : null}
