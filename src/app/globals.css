@@ -22,6 +22,7 @@
 html,
 body {
   margin: 0;
+  height: 100%;
   min-height: 100%;
   background:
     radial-gradient(circle at top right, rgba(83, 189, 235, 0.08), transparent 20%),
@@ -31,7 +32,7 @@ body {
 }
 
 body {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 button,
@@ -41,12 +42,14 @@ textarea {
 }
 
 .page {
-  min-height: 100vh;
+  height: 100dvh;
   padding: 16px;
+  overflow: hidden;
 }
 
 .shell {
-  min-height: calc(100vh - 32px);
+  height: calc(100dvh - 32px);
+  min-height: 0;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 28px;
@@ -54,12 +57,14 @@ textarea {
   overflow: hidden;
   display: grid;
   grid-template-columns: 360px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(24, 34, 41, 0.98), rgba(17, 27, 33, 0.98)),
     var(--panel);
@@ -213,6 +218,9 @@ h1 {
 
 .chatList {
   display: grid;
+  flex: 1;
+  min-height: 0;
+  align-content: start;
   gap: 2px;
   padding: 8px;
   overflow-y: auto;
@@ -312,6 +320,7 @@ h1 {
 
 .conversationPanel {
   min-height: 0;
+  overflow: hidden;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   background:
@@ -352,6 +361,7 @@ h1 {
 
 .messagesPane {
   display: grid;
+  min-height: 0;
   align-content: start;
   gap: 12px;
   padding: 22px 28px;
@@ -399,7 +409,7 @@ h1 {
 }
 
 .composer {
-  padding: 20px 28px 24px;
+  padding: 16px 28px 18px;
   border-top: 1px solid var(--border);
   background: rgba(17, 27, 33, 0.92);
 }
@@ -456,8 +466,9 @@ h1 {
 }
 
 .composerInput {
-  resize: vertical;
-  min-height: 110px;
+  resize: none;
+  height: 96px;
+  min-height: 96px;
   padding: 14px 16px;
 }
 
@@ -754,13 +765,15 @@ h1 {
   }
 
   .shell {
-    min-height: 100vh;
+    height: 100dvh;
+    min-height: 0;
     border-radius: 0;
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(180px, 36dvh) minmax(0, 1fr);
   }
 
   .sidebar {
-    min-height: 46vh;
+    min-height: 0;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
@@ -786,6 +799,26 @@ h1 {
   .modalCard {
     padding-left: 16px;
     padding-right: 16px;
+  }
+
+  .conversationHeader {
+    padding-top: 16px;
+    padding-bottom: 14px;
+  }
+
+  .messagesPane {
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  .composer {
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  .composerInput {
+    height: 84px;
+    min-height: 84px;
   }
 
   .composerActions,
