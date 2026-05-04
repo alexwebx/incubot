@@ -58,7 +58,7 @@ Feature / architecture.
   - [x] Deno check for Edge Function if available;
   - [x] SQL review for migration safety;
   - [x] no unrelated file changes.
-- [ ] Commit and push after verification.
+- [x] Commit and push after verification.
 
 ## Model Decision
 
